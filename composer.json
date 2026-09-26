@@ -1,0 +1,44 @@
+{
+    "name": "migears/manager",
+    "description": "Minimalist Manager layer — business orchestration: coordinate Domains, persist through DAOs, notify through events",
+    "type": "library",
+    "license": "MIT",
+    "version": "2.0.0",
+    "authors": [
+        {
+            "name": "Sam X. Xu",
+            "email": "samxxu@gmail.com"
+        }
+    ],
+    "keywords": [
+        "manager",
+        "registry",
+        "ddd",
+        "orchestration",
+        "event",
+        "event-driven",
+        "domain",
+        "migears"
+    ],
+    "require": {
+        "php": "^8.1",
+        "psr/container": "^2.0",
+        "psr/log": "^3.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10"
+    },
+    "autoload": {
+        "psr-4": {
+            "MiGears\\Manager\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "MiGears\\Manager\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit"
+    }
+}
