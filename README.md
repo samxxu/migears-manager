@@ -290,7 +290,7 @@ façade has stopped paying for itself and the conventions will drift apart.
 |---|---|
 | Read `$_POST` / `$_FILES` / headers / the session | The entry layer maps input and passes an array plus scalars. |
 | Build a response, pick a status code, format JSON | Return a Domain; the entry layer serialises it. |
-| Write SQL, or hold a `PDO` "just in case" | Put the query in the DAO and reach the DAO through the Registry. |
+| Write SQL, or hold a `PDO` "just in case" | Put the query in the DAO and reach the DAO through the Registry. A `PDO` reaches a Manager in one case only — a transaction across independent DAOs — and it arrives as a parameter, never as a property (see Transactions). |
 | Send mail / SMS / HTTP calls, write log lines | Emit an event; `logger()` is there for diagnosis, not for notification. |
 | Touch another module's DAO | Call that module's Manager, resolved from the Registry. |
 | Keep a singleton, static registry or service locator in your own code | Inject the Registry and resolve in the constructor; the package's own bus is its only process-level state, and it is internal |
@@ -315,7 +315,9 @@ public function place(array $form, int $actorId): OrderDomain
 ```
 
 **Queries: ask the DAO, not the database.** Once a Manager holds a `PDO` it will eventually write a
-statement, and then the SQL for one table lives in two files. Every query gets one home.
+statement, and then the SQL for one table lives in two files. Every query gets one home. The one `PDO`
+a Manager may receive arrives as a parameter for a single transaction, never as a property — that
+difference is the whole reason the rule and the exception below do not collide.
 
 ```php
 // ✗
@@ -543,10 +545,12 @@ question never reaches the Manager.
 |---|---|
 | One statement | Nobody — it is already atomic. |
 | Two tables that always move together | The DAO: it owns the connection, so it owns `beginTransaction()` / `commit()` / `rollBack()`. |
-| Several independent DAOs in one use case | The Manager, given the `PDO` explicitly. A deliberate cost — first ask whether the write belongs to one DAO. |
+| Several independent DAOs in one use case | The Manager, given the `PDO` as a parameter — the single exception to "no `PDO` in a Manager", alive only for the duration of one transaction. A deliberate cost: first ask whether the write belongs to one DAO. |
 
 If a use case needs three DAOs inside one transaction, that usually means one of them is missing a
-method, not that the Manager needs to own connections.
+method, not that the Manager needs to own connections. Either way the connection is never stored: it is
+passed in for one call, used to open one transaction, and dropped when the method returns. That is the
+only relationship a Manager is ever allowed to have with a `PDO`.
 
 ## Events
 
@@ -1213,7 +1217,7 @@ final class OrderManager extends BaseManager
 |---|---|
 | 读 `$_POST` / `$_FILES` / header / session | 由入口层完成映射，只传数组与标量进来。 |
 | 构造响应、选状态码、拼 JSON | 返回 Domain，由入口层序列化。 |
-| 写 SQL、为了省事持有 `PDO` | 查询放 DAO，DAO 从 Registry 取。 |
+| 写 SQL、为了省事持有 `PDO` | 查询放 DAO，DAO 从 Registry 取。Manager 只有一种情况会拿到 `PDO` —— 一个事务跨几个彼此独立的 DAO —— 而且它是参数，不是属性（见「事务」）。 |
 | 发邮件 / 短信 / HTTP 调用、写日志 | 发事件；`logger()` 是用来诊断的，不是用来通知的。 |
 | 伸手去用别的模块的 DAO | 调用那个模块的 Manager，从 Registry 取。 |
 | 在自己代码里维护单例、静态注册表、服务定位器 | 注入 Registry，在构造期解析；本包自己的总线是它唯一的进程级状态，而且是内部件 |
@@ -1237,7 +1241,8 @@ public function place(array $form, int $actorId): OrderDomain
 ```
 
 **查询：问 DAO，不问数据库。** 一旦 Manager 手里有了 `PDO`，早晚会写出一条语句，然后同一张表的 SQL 就散落在两个文件里。
-每条查询只该有一个家。
+每条查询只该有一个家。Manager 唯一可能收到的 `PDO` 是某个事务的参数，而不是它留存的属性；这个区别
+正是这条规则与下面「事务」里那条例外并不冲突的原因。
 
 ```php
 // ✗
@@ -1457,9 +1462,11 @@ public function place(array $form, int $actorId): OrderDomain
 |---|---|
 | 单条语句 | 无人在管 — 它本身就是原子的。 |
 | 永远一起动的两张表 | DAO：它持有连接，就由它 `beginTransaction()` / `commit()` / `rollBack()`。 |
-| 一个用例里几个彼此独立的 DAO | Manager，显式接收 `PDO`。这是看得见、刻意的代价 — 先问问这次写入是不是本该属于某一个 DAO。 |
+| 一个用例里几个彼此独立的 DAO | Manager，以参数形式接收 `PDO` —— 这是「Manager 不持有 PDO」唯一的一条例外，只在一次事务的时间内存活。这是看得见、刻意的代价：先问问这次写入是不是本该属于某一个 DAO。 |
 
 如果一个用例需要在同一个事务里动用三个 DAO，通常说明其中一个少了一个方法，而不是 Manager 需要去持有连接。
+无论哪种情况，连接都不会被留住：它作为参数进来，用于开启一次事务，方法返回时即被丢下。这就是 Manager 与
+`PDO` 之间唯一被允许的关系。
 
 ## 事件
 
