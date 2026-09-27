@@ -25,11 +25,12 @@ namespace MiGears\Manager;
  *
  * Internal to this package: never type-hint it, never register it, never pass it.
  * BaseManager owns the single instance — one per process — and is the only way
- * in: emit() for Managers, listen() for the wiring.
+ * in: emit() for Managers, listen() for the wiring. The class is final: there is
+ * nothing to extend and nothing to swap.
  *
  * @internal
  */
-class EventBus
+final class EventBus
 {
     private static ?self $instance = null;
 

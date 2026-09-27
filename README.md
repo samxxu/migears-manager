@@ -293,7 +293,7 @@ façade has stopped paying for itself and the conventions will drift apart.
 | Write SQL, or hold a `PDO` "just in case" | Put the query in the DAO and reach the DAO through the Registry. |
 | Send mail / SMS / HTTP calls, write log lines | Emit an event; `logger()` is there for diagnosis, not for notification. |
 | Touch another module's DAO | Call that module's Manager, resolved from the Registry. |
-| Keep a singleton, static registry or service locator | Inject the Registry and resolve in the constructor. |
+| Keep a singleton, static registry or service locator in your own code | Inject the Registry and resolve in the constructor; the package's own bus is its only process-level state, and it is internal |
 | Remember request state between calls | Pass it as a parameter. |
 | Let anyone else hold, resolve or receive one of its DAOs | Keep the DAO a private property; the Manager is the module's only door to its tables. |
 
@@ -569,6 +569,11 @@ The bus behind those two calls is **internal to this package**. You never type-h
 it, never pass it to a constructor and never put it in the Registry. `BaseManager` is the whole public
 surface: `listen()` for the wiring, `emit()` for Managers.
 
+That bus is the package's only process-level state, and the exception is deliberate: one bus per
+process is what lets a listener registered by the wiring be seen by every Manager, and no business code
+ever holds a reference to it. Nothing else here keeps static state — a Manager still receives
+everything it uses through the Registry.
+
 **Names** are `module.action`, in the past tense — a fact, not a command:
 
 ```
@@ -611,6 +616,17 @@ BaseManager::listen(OrderEvents::CANCELLED, function (OrderDomain $order, int $a
 4. the listener list is snapshotted when the call starts, so subscribing from inside a listener affects the next emit, not the current one
 5. a throwing listener propagates and later listeners are skipped — failures are never swallowed
 6. no wildcards, no `once`, no queue, no retries, no persistence, no cross-process delivery
+
+Point 5 has a consequence worth stating on its own, because there is no transaction manager and no
+outbox here: by the time the listeners run, the write **has already been committed**. A listener that
+throws therefore turns a finished write into a failed request, and the entry layer's natural reaction,
+a retry, writes the row a second time. The answers live outside this package, and both are honest:
+
+- make the use case idempotent (a natural key, or a unique index the DAO can rely on), so a retry is safe
+- absorb inside the listener only what it can genuinely recover from, and let the rest propagate
+
+Nothing here can roll that write back, and nothing pretends to: "after commit" dispatch is not
+implemented (see *What this package does not do*).
 
 **Write, re-read, emit** is the order that makes those synchronous listeners safe. Because a listener
 runs immediately and reads the same DAOs, it must never see an object that was only intended:
@@ -786,7 +802,7 @@ recognise one of them, the fix column is usually the smaller change.
 | **Sends mail itself** | The use case now needs SMTP to be tested, and every new channel edits the Manager | Emit an event |
 | **Returns arrays or JSON** — `['code' => 0, ...]` | The layer that knows least about HTTP decides the response shape | Return Domains |
 | **Reads the request** | The use case cannot run from cron, or be tested without HTTP | Pass data in |
-| **Static state** — `instance()`, a static container | Tests leak into each other; the object graph becomes invisible | Inject the Registry; one Manager per request |
+| **Static state in business code** — `instance()`, a static container | Tests leak into each other; the object graph becomes invisible | Inject the Registry; one Manager per request. The bus is the package's single deliberate exception, and business code never holds it |
 | **Two Managers kept in sync by hand** | One write is eventually forgotten | One owner writes, the other reacts to an event |
 | **Event used as a command** — `emit('ship.the.order', $order)` | The emitter quietly takes the responsibility back, invisibly | Name the fact: `order.placed` |
 | **Emitting before the write** | A synchronous listener reads a row that is not there yet | Write, re-read, emit |
@@ -887,7 +903,7 @@ caught either way.
 | `emit(string $event, mixed ...$payload)` | protected | Emit an event once the write has succeeded |
 | `logger()` | protected | The `Psr\Log\LoggerInterface` every Manager was given; never null |
 
-`EventBus` is internal. It is not part of the API, is never injected and never registered.
+`EventBus` is internal and `final`. It is not part of the API, is never injected and never registered; the tests are the one place that builds and resets it directly.
 
 ## What this package does not do
 
@@ -1177,7 +1193,7 @@ final class OrderManager extends BaseManager
 | 写 SQL、为了省事持有 `PDO` | 查询放 DAO，DAO 从 Registry 取。 |
 | 发邮件 / 短信 / HTTP 调用、写日志 | 发事件；`logger()` 是用来诊断的，不是用来通知的。 |
 | 伸手去用别的模块的 DAO | 调用那个模块的 Manager，从 Registry 取。 |
-| 单例、静态注册表、服务定位器 | 注入 Registry，在构造期解析。 |
+| 在自己代码里维护单例、静态注册表、服务定位器 | 注入 Registry，在构造期解析；本包自己的总线是它唯一的进程级状态，而且是内部件 |
 | 在调用之间记住请求状态 | 当成参数传进来。 |
 | 让别的任何地方持有、解析或接收它的 DAO | 让 DAO 保持为私有属性；Manager 才是模块通往自己那几张表的唯一一扇门。 |
 
@@ -1441,6 +1457,10 @@ BaseManager::listen(OrderEvents::PLACED, function (OrderDomain $order) use ($reg
 这两次调用背后的总线是**本包的内部件**。你不会在签名里写它、不会注册它、不会把它传给构造函数、
 也不会把它放进 Registry。`BaseManager` 就是全部对外面：`listen()` 给装配用，`emit()` 给 Manager 用。
 
+这条总线是本包唯一的进程级状态，这个例外是刻意的：一个进程一条总线，装配时注册的监听器才能被每个
+Manager 看见，而任何业务代码都不会持有它的引用。除它之外本包没有任何静态状态 —— Manager 用到的东西
+依然一律从 Registry 取。
+
 **命名**是 `模块.动作`，过去式 — 是事实，不是命令：
 
 ```
@@ -1481,6 +1501,15 @@ BaseManager::listen(OrderEvents::CANCELLED, function (OrderDomain $order, int $a
 4. 调用开始时对监听器列表做快照，所以在监听器内部订阅，影响的是下一次 emit，不是当前这次
 5. 监听器抛异常会向上传播，其后的监听器被跳过 — 失败永远不会被吞掉
 6. 没有通配符、没有 `once`、没有队列、没有重试、没有持久化、没有跨进程投递
+
+第 5 条有一个后果值得单独说，因为这里既没有事务管理器也没有 outbox：监听器运行时，写入**已经提交**。
+于是抛异常的监听器会把一次已经完成的写入变成一次失败的请求，而入口层最自然的反应 —— 重试 —— 会把这一行
+写第二遍。答案都在本包之外，而且都诚实：
+
+- 让用例幂等（自然键，或一个 DAO 可以依赖的唯一索引），重试才是安全的
+- 监听器只消化它确实能恢复的失败，其余一律上抛
+
+本包没有办法回滚那次写入，也不假装有：「提交后」派发没有实现（见 *本包不做的事*）。
 
 **落库、重读、发事件**，这个顺序正是让同步监听器安全的原因。监听器会立刻执行、并且读同一批 DAO，
 所以它绝不能看到一个「只是打算写入」的对象：
@@ -1648,7 +1677,7 @@ final class Index extends AbstractResource
 | **自己发邮件** | 用例的测试从此需要 SMTP，每加一个渠道都要改 Manager | 发事件 |
 | **返回数组或 JSON** — `['code' => 0, ...]` | 最不了解 HTTP 的那一层，反而决定了响应形态 | 返回 Domain |
 | **读 Request** | 用例无法从 cron 跑，也无法脱离 HTTP 测试 | 把数据传进来 |
-| **静态状态** — `instance()`、静态容器 | 测试相互污染；对象图变得不可见 | 注入 Registry；每请求一个 Manager |
+| **业务代码里的静态状态** — `instance()`、静态容器 | 测试相互污染；对象图变得不可见 | 注入 Registry；每请求一个 Manager。总线是本包唯一刻意的例外，而且业务代码永远不持有它 |
 | **靠人工同步的两个 Manager** | 迟早漏掉一次写入 | 一方负责写，另一方对事件作出反应 |
 | **把事件当命令** — `emit('ship.the.order', $order)` | 发出方悄悄把职责又拿了回来，而且不可见 | 给事实命名：`order.placed` |
 | **先发事件，后落库** | 同步监听器读到的是一行还不存在的数据 | 落库、重读、再发事件 |
@@ -1744,7 +1773,7 @@ Manager 建在手写 SQL 与普通对象之上，同样成立。
 | `emit(string $event, mixed ...$payload)` | protected | 在写入成功之后发出事件 |
 | `logger()` | protected | 每个 Manager 都拿到的 `Psr\Log\LoggerInterface`，永不为 null |
 
-`EventBus` 是内部件：不属于 API，永远不被注入，也永远不被注册。
+`EventBus` 是内部件，而且是 `final`：不属于 API，永远不被注入，也永远不被注册；测试是唯一会直接构建并重置它的地方。
 
 ## 本包不做的事
 

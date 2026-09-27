@@ -46,11 +46,16 @@ use Psr\Log\LoggerInterface;
  * no CRUD, no query helpers, no container accessor, no magic.
  *
  * The event bus behind emit() is internal to this package: it never appears in
- * a constructor, in a registration or in a test. Listeners are subscribed once,
- * at initialization, by the wiring that builds the Managers — see listen().
+ * a constructor, in a registration or in business code. Listeners are
+ * subscribed once, at initialization, by the wiring that builds the Managers
+ * (see listen()). The one documented exception is the test suite: a
+ * process-level bus outlives a test case, so the tests build it directly and
+ * reset it between cases.
  */
 abstract class BaseManager
 {
+    public const VERSION = '2.0.0';
+
     private readonly LoggerInterface $logger;
 
     public function __construct(ContainerInterface $registry)
