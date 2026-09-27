@@ -157,4 +157,45 @@ final class BaseManagerTest extends TestCase
 
         new OrderManager($registry);
     }
+
+    // --- The documented "write, then emit" consequence ---
+
+    public function testAThrowingListenerPropagatesAfterTheWriteIsAlreadyCommitted(): void
+    {
+        // README (Event delivery, point 5): a throwing listener propagates out
+        // of the use case although the row is already persisted. The runner's
+        // answer is idempotency, not a rollback this package cannot provide.
+        $statusWhenNotified = null;
+        BaseManager::listen(OrderManager::PLACED, function (OrderDomain $order) use (&$statusWhenNotified): void {
+            $statusWhenNotified = $this->orders->getByIdOrFail($order->id)['status'];
+            throw new RuntimeException('listener boom');
+        });
+
+        try {
+            $this->manager->place('First order');
+            self::fail('A throwing listener must propagate out of the use case.');
+        } catch (RuntimeException $e) {
+            self::assertSame('listener boom', $e->getMessage());
+        }
+
+        self::assertSame('PLACED', $statusWhenNotified);
+        self::assertSame('PLACED', $this->orders->getByIdOrFail(1)['status']);
+    }
+
+    public function testWiringTwiceAccumulatesListeners(): void
+    {
+        // Wiring must run once per process: a second pass re-subscribes, and a
+        // duplicated listener fires once per registration (README: before you run it).
+        $calls = 0;
+        $listener = function () use (&$calls): void {
+            $calls++;
+        };
+
+        BaseManager::listen(OrderManager::PLACED, $listener);
+        BaseManager::listen(OrderManager::PLACED, $listener);
+
+        $this->manager->place('First order');
+
+        self::assertSame(2, $calls);
+    }
 }
