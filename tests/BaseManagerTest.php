@@ -9,6 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 use MiGears\Manager\BaseManager;
 use MiGears\Manager\EventBus;
+use MiGears\Manager\SideEffectFailedException;
 use MiGears\Manager\Tests\Fixtures\ArrayContainer;
 use MiGears\Manager\Tests\Fixtures\ArrayLogger;
 use MiGears\Manager\Tests\Fixtures\InMemoryOrderDao;
@@ -160,11 +161,13 @@ final class BaseManagerTest extends TestCase
 
     // --- The documented "write, then emit" consequence ---
 
-    public function testAThrowingListenerPropagatesAfterTheWriteIsAlreadyCommitted(): void
+    public function testAThrowingListenerLeavesTheWriteCommittedAndARetryDuplicatesIt(): void
     {
-        // README (Event delivery, point 5): a throwing listener propagates out
-        // of the use case although the row is already persisted. The runner's
-        // answer is idempotency, not a rollback this package cannot provide.
+        // README (Event delivery, point 5): a throwing listener leaves the use
+        // case through SideEffectFailedException although the row is already
+        // persisted, and the retry an entry layer would naturally make writes it
+        // a second time. The answers are idempotency and absorbing what a
+        // listener can recover from — not a rollback this package cannot provide.
         $statusWhenNotified = null;
         BaseManager::listen(OrderManager::PLACED, function (OrderDomain $order) use (&$statusWhenNotified): void {
             $statusWhenNotified = $this->orders->getByIdOrFail($order->id)['status'];
@@ -173,13 +176,25 @@ final class BaseManagerTest extends TestCase
 
         try {
             $this->manager->place('First order');
-            self::fail('A throwing listener must propagate out of the use case.');
-        } catch (RuntimeException $e) {
-            self::assertSame('listener boom', $e->getMessage());
+            self::fail('A throwing listener must leave the use case.');
+        } catch (SideEffectFailedException $e) {
+            self::assertSame(OrderManager::PLACED, $e->event);
+            self::assertSame('listener boom', $e->getPrevious()?->getMessage());
+            self::assertStringContainsString('a retry may duplicate it', $e->getMessage());
         }
 
         self::assertSame('PLACED', $statusWhenNotified);
         self::assertSame('PLACED', $this->orders->getByIdOrFail(1)['status']);
+
+        // the entry layer retries the failed request: the row is written again
+        try {
+            $this->manager->place('First order');
+            self::fail('The retry fails the same way.');
+        } catch (SideEffectFailedException) {
+            // expected
+        }
+
+        self::assertSame('PLACED', $this->orders->getByIdOrFail(2)['status']);
     }
 
     public function testWiringTwiceAccumulatesListeners(): void

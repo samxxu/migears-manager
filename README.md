@@ -8,6 +8,25 @@ The business layer — it owns a module's business operations, writes through DA
 > self-developed PHP framework. It was renamed and open-sourced recently because
 > the name *TinyGears* is already taken in the open-source community.
 
+## Contents
+
+- [Design spirit](#design-spirit)
+- [Two phases: wiring, then runtime](#two-phases-wiring-then-runtime)
+- [The registry: a PSR-11 container](#the-registry-a-psr-11-container)
+- [The skeleton](#the-skeleton)
+- [Responsibilities](#responsibilities)
+- [Four habits, with the alternative](#four-habits-with-the-alternative)
+- [Domains](#domains)
+- [DAOs](#daos)
+- [Events](#events)
+- [Entry layer](#entry-layer)
+- [Anti-patterns](#anti-patterns)
+- [Trade-offs](#trade-offs)
+- [Installation](#installation)
+- [API Reference](#api-reference)
+- [What this package does not do](#what-this-package-does-not-do)
+- [License](#license)
+
 ## Design spirit
 
 A codebase needs exactly one place where a business rule can be written down. In miGears that place
@@ -618,13 +637,16 @@ BaseManager::listen(OrderEvents::CANCELLED, function (OrderDomain $order, int $a
 2. in registration order, no priorities
 3. no listeners → nothing happens; emitting is always safe
 4. the listener list is snapshotted when the call starts, so subscribing from inside a listener affects the next emit, not the current one
-5. a throwing listener propagates and later listeners are skipped — failures are never swallowed
+5. a throwing listener aborts the call, later listeners are skipped, and the failure reaches the caller as `SideEffectFailedException` — failures are never swallowed
 6. no wildcards, no `once`, no queue, no retries, no persistence, no cross-process delivery
 
 Point 5 has a consequence worth stating on its own, because there is no transaction manager and no
 outbox here: by the time the listeners run, the write **has already been committed**. A listener that
-throws therefore turns a finished write into a failed request, and the entry layer's natural reaction,
-a retry, writes the row a second time. The answers live outside this package, and both are honest:
+throws therefore turns a finished write into a failed request, and the exception the caller sees says
+exactly that — `SideEffectFailedException` carries the event name and keeps the listener's own exception
+as `previous`, so an entry layer can tell this case from a write that never happened before it decides
+what to do. What it would naturally do — retry — writes the row a second time. The answers live outside
+this package, and both are honest:
 
 - make the use case idempotent (a natural key, or a unique index the DAO can rely on), so a retry is safe
 - absorb inside the listener only what it can genuinely recover from, and let the rest propagate
@@ -889,6 +911,7 @@ reverse them if your project disagrees — none of them is load-bearing for the 
 | The contract is PSR-11's (`psr/container`) | Declare our own `Registry` interface here | The web package can implement the same contract without depending on this one — and any PSR-11 container works, including one in a test. The cost is that the standard name says "container", which carries auto-wiring associations we do not honour | Declare your own interface and accept the dependency between the two packages |
 | The event bus is internal and process-wide | Pass it in, or register it in the Registry | It is plumbing, not a collaborator: neither a Manager nor a wiring should have to hold it. The cost is one shared instance per process | Send events through your own mechanism instead of `emit()` |
 | `BaseManager` gives only the logger and `emit()` | A fat base class with CRUD, logger and registry access | Every extra member is a decision the framework makes for you | Don't extend it; implement your own `emit()` |
+| A listener failure arrives as `SideEffectFailedException` | Let the listener's exception through untouched | The write is already committed, and a caller that cannot tell that apart from "nothing happened" retries and duplicates the row. The cost is one more public type, and a caller that caught the listener's exception by class name no longer sees it directly | Propagate untouched and let callers read the message |
 | Event names are plain strings | One class per event | No files, no inheritance; the cost is that a typo is silent, hence the constants | Use class names as event names |
 | Payload is positional values | A single event object | No envelope, no base class; the signature documents it | Pass one object as the only payload |
 | No interface per DAO | Interface per table | One implementation is not a seam | Add the interface when a second implementation exists |
@@ -932,6 +955,20 @@ caught either way.
 
 `EventBus` is internal and `final`. It is not part of the API, is never injected and never registered; the tests are the one place that builds and resets it directly.
 
+### `SideEffectFailedException`
+
+The one exception this package throws, and it is a `RuntimeException`. `emit()` raises it when a listener
+fails, because by then the write is committed.
+
+| Member | Type | Description |
+|---|---|---|
+| `$event` | `string` | The event whose listener failed |
+| `getPrevious()` | `Throwable` | The listener's own exception, untouched |
+
+It exists so that an entry layer can tell "the row is stored and a side effect failed" from "nothing
+happened" — the difference between a retry that is safe and one that duplicates data. The bus wraps
+nothing itself; this is the Manager layer naming a failure it can already see.
+
 ## What this package does not do
 
 - No container interface of its own, and no container implementation: it speaks PSR-11 (`psr/container`) so that it and the web package stay independent of each other
@@ -957,6 +994,25 @@ MIT
 业务层 — 拥有一个模块的业务操作、经 DAO 落库，并把每一项副效应都宣告为事件。
 
 > **背景**：miGears 是自研 PHP 框架 **TinyGears** 的开源后继。因 *TinyGears* 这个名字在开源社区已被占用，近期更名并开源。
+
+## 目录
+
+- [设计精神](#设计精神)
+- [两个阶段：装配，然后运行](#两个阶段装配然后运行)
+- [注册表：一个 PSR-11 容器](#注册表一个-psr-11-容器)
+- [骨架](#骨架)
+- [Manager 的职责](#manager-的职责)
+- [四个习惯，以及它们的反例](#四个习惯以及它们的反例)
+- [Domain](#domain)
+- [DAO](#dao)
+- [事件](#事件)
+- [入口层](#入口层)
+- [常见反模式](#常见反模式)
+- [刻意的取舍](#刻意的取舍)
+- [安装](#安装)
+- [API 参考](#api-参考)
+- [本包不做的事](#本包不做的事)
+- [许可证](#许可证)
 
 ## 设计精神
 
@@ -1529,12 +1585,14 @@ BaseManager::listen(OrderEvents::CANCELLED, function (OrderDomain $order, int $a
 2. 按注册顺序，没有优先级
 3. 没有监听器就什么都不发生；发事件永远安全
 4. 调用开始时对监听器列表做快照，所以在监听器内部订阅，影响的是下一次 emit，不是当前这次
-5. 监听器抛异常会向上传播，其后的监听器被跳过 — 失败永远不会被吞掉
+5. 监听器抛异常会中断本次调用，其后的监听器被跳过，失败以 `SideEffectFailedException` 到达调用方 — 失败永远不会被吞掉
 6. 没有通配符、没有 `once`、没有队列、没有重试、没有持久化、没有跨进程投递
 
 第 5 条有一个后果值得单独说，因为这里既没有事务管理器也没有 outbox：监听器运行时，写入**已经提交**。
-于是抛异常的监听器会把一次已经完成的写入变成一次失败的请求，而入口层最自然的反应 —— 重试 —— 会把这一行
-写第二遍。答案都在本包之外，而且都诚实：
+于是抛异常的监听器会把一次已经完成的写入变成一次失败的请求，而调用方看到的异常会把这个事实说清楚 ——
+`SideEffectFailedException` 带着事件名，并把监听器自己的异常放在 `previous` 里，入口层因此能分辨「数据已
+落库」与「什么都没发生」，再做决定。它最自然的反应 —— 重试 —— 会把这一行写第二遍。答案都在本包之外，
+而且都诚实：
 
 - 让用例幂等（自然键，或一个 DAO 可以依赖的唯一索引），重试才是安全的
 - 监听器只消化它确实能恢复的失败，其余一律上抛
@@ -1783,6 +1841,7 @@ BaseManager::listen(OrderEvents::PLACED, function (OrderDomain $order) use ($reg
 | 契约用 PSR-11（`psr/container`） | 在本包里自建 `Registry` 接口 | web 包可以实现同一个契约、却不依赖本包 —— 而且任何 PSR-11 容器都能用，测试里那个也行。代价是标准名字叫「container」，自带我们并不遵循的自动装配联想 | 自建接口，并接受两个包之间的依赖 |
 | 事件总线是内部件、进程级 | 传进来，或者注册进 Registry | 它是管道，不是协作者：Manager 和 wiring 都不该持有它。代价是每进程一个共享实例 | 不用 `emit()`，改用你自己的机制发事件 |
 | `BaseManager` 只给 logger 与 `emit()` | 塞进 CRUD、logger 和 Registry 访问器的胖基类 | 每多一个成员，就是框架替你多做一次决定 | 不继承它，自己实现 `emit()` |
+| 监听器失败以 `SideEffectFailedException` 到达 | 让监听器的异常原样穿出 | 写入已经提交，调用方若分不清「数据已落库」和「什么都没发生」，就会重试并写出第二行。代价是多一个公开类型，而且按类名捕获监听器异常的调用方不再直接看到它 | 原样穿透，让调用方读消息自行判断 |
 | 事件名是普通字符串 | 一个事件一个类 | 零文件、零继承；代价是拼错静默，所以推荐常量 | 改用类名做事件名 |
 | 载荷是位置参数 | 单个事件对象 | 没有信封、没有基类；监听器签名即文档 | 只传一个对象作为唯一载荷 |
 | 不写 DAO 接口 | 一张表一个接口 | 单实现不是接缝 | 出现第二种实现时再加 |
@@ -1823,6 +1882,18 @@ Manager 建在手写 SQL 与普通对象之上，同样成立。
 | `logger()` | protected | 每个 Manager 都拿到的 `Psr\Log\LoggerInterface`，永不为 null |
 
 `EventBus` 是内部件，而且是 `final`：不属于 API，永远不被注入，也永远不被注册；测试是唯一会直接构建并重置它的地方。
+
+### `SideEffectFailedException`
+
+本包唯一自己抛出的异常，它也是 `RuntimeException`。监听器失败时由 `emit()` 抛出 —— 因为到那时写入已经提交。
+
+| 成员 | 类型 | 说明 |
+|---|---|---|
+| `$event` | `string` | 监听器失败的那个事件名 |
+| `getPrevious()` | `Throwable` | 监听器自己的异常，原样保留 |
+
+它的意义是让入口层能分辨「这一行已经落库、只是某个副效应失败」与「什么都没发生」—— 这正是「重试是安全的」与
+「重试会写出重复数据」之间的区别。总线本身不做任何包装；这是 Manager 层在给一个它已经看得见的失败命名。
 
 ## 本包不做的事
 

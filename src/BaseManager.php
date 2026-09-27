@@ -6,6 +6,7 @@ namespace MiGears\Manager;
 
 use Psr\Container\ContainerInterface;
 use Psr\Log\LoggerInterface;
+use Throwable;
 
 /**
  * Base class for Manager classes.
@@ -88,10 +89,19 @@ abstract class BaseManager
      * Call it after the write succeeded, never before: an event states a fact
      * that is already stored. Hand listeners the freshly re-read state, so a
      * synchronous listener can never act on a value that was only intended.
+     *
+     * A listener that throws is wrapped in SideEffectFailedException, which
+     * carries the event name and the original exception. By the time emit()
+     * runs the write is committed, so an entry layer has to be able to tell
+     * this apart from a write that never happened before it decides to retry.
      */
     final protected function emit(string $event, mixed ...$payload): void
     {
-        EventBus::instance()->emit($event, ...$payload);
+        try {
+            EventBus::instance()->emit($event, ...$payload);
+        } catch (Throwable $e) {
+            throw new SideEffectFailedException($event, $e);
+        }
     }
 
     /**
