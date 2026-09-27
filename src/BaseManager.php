@@ -48,9 +48,10 @@ use Psr\Log\LoggerInterface;
  * The event bus behind emit() is internal to this package: it never appears in
  * a constructor, in a registration or in business code. Listeners are
  * subscribed once, at initialization, by the wiring that builds the Managers
- * (see listen()). The one documented exception is the test suite: a
- * process-level bus outlives a test case, so the tests build it directly and
- * reset it between cases.
+ * (see listen()). The documented exceptions are the test suite, which builds the
+ * bus directly and resets it between cases because a process-level bus outlives
+ * a test case, and a long-running host that has to rebuild its wiring (README:
+ * Long-running runtimes).
  */
 abstract class BaseManager
 {

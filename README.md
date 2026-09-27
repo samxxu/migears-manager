@@ -752,8 +752,31 @@ $this->assertSame('CAPTURED', $captured);
 ```
 
 Because the bus is process-wide and internal, a test suite has to start each test with an empty one —
-`EventBus::reset()` in `setUp()`. That is the single documented exception to "you never touch the bus",
-and it exists only because the tests of a whole suite share one process.
+`EventBus::reset()` in `setUp()`. That is one of the two documented exceptions to "you never touch the
+bus", and it exists only because the tests of a whole suite share one process; the other is a
+long-running host that has to rebuild its wiring, below.
+
+### Long-running runtimes
+
+The bus exists per process, not per request: it is created the first time it is used and lives until the
+process ends, and listeners only ever accumulate. Under PHP-FPM, or in a one-shot CLI run, there is
+nothing to worry about, because a process naturally wires once. Under a worker that serves many requests
+or jobs in one process — RoadRunner, Swoole, FrankenPHP, or any host that rebuilds its wiring between
+jobs — wiring that runs per request registers the same listeners on every pass, so invoices, mails and
+notifications multiply.
+
+There is one rule: **wire once per process**, at boot. If a host genuinely has to wire again, because a
+config reload or a per-job rebuild asks for it, drop the bus first:
+
+```php
+// worker bootstrap — once per process
+EventBus::reset();        // drop the listeners the previous pass left, and the instance with them
+$registry = Wiring::buildRegistry($pdo, $redis, $logger, $mailer);
+```
+
+The package does not try to detect a second pass: `on()` appends whatever it is given. What keeps the
+rule safe is that wiring happens at one moment in the process, and `reset()` is the way out when it
+genuinely has to happen twice.
 
 ## Entry layer
 
@@ -1631,8 +1654,27 @@ $this->assertSame('CAPTURED', $captured);
 ```
 
 由于总线是进程级、且属于内部件，测试套件必须让每个用例从一条空总线开始 —— 在 `setUp()` 里调用
-`EventBus::reset()`。这是「永远不要碰总线」这条规矩唯一一处成文的例外，而它存在的原因仅仅是
-一整个测试套件共享同一个进程。
+`EventBus::reset()`。这是「永远不要碰总线」两处成文例外中的一处，原因是整个测试套件共享同一个进程；
+另一处是下面这种需要重新装配的长驻宿主。
+
+### 长驻运行时
+
+总线是按进程而不是按请求存在的：第一次用到时创建，之后一直活到进程结束，监听器只会越积越多。
+在 PHP-FPM 或一次性的 CLI 运行里没什么可担心的 —— 一个进程天然只装配一次。但在一个进程要服务很多
+请求或任务的工作进程里（RoadRunner、Swoole、FrankenPHP，或任何会在任务之间重建 wiring 的宿主），
+装配如果跟着请求走，每一遍都会把同一批监听器再注册一次，发票、邮件、通知就会成倍触发。
+
+规则只有一条：**每个进程只装配一次**，在启动时完成。如果宿主确实必须再装配一遍（重载配置、
+按任务重建），先把总线清掉：
+
+```php
+// worker 启动 —— 每个进程一次
+EventBus::reset();        // 丢掉上一遍 wiring 留下的监听器，连同那个实例
+$registry = Wiring::buildRegistry($pdo, $redis, $logger, $mailer);
+```
+
+本包不去猜你是否注册了第二遍：`on()` 给它什么就追加什么。让这条规则安全的是「装配在进程里只发生在
+一个时刻」这个事实，而 `reset()` 就是它真的必须发生两次时唯一的出口。
 
 ## 入口层
 
