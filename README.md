@@ -405,14 +405,24 @@ final class OrderDomain
 
 Related rows a Domain must not fetch by itself get their loader injected from the Manager, so the
 accessor reads naturally while the dependency knowledge stays in the layer that has it
-(see `migears/domain` → *Related Data*):
+(see `migears/domain` → *Related Data*). There is no lifecycle hook to hang this on, and nothing
+calls a `boot()` for you: the wiring builds each Manager once, before anything is served, so the
+constructor is the place.
 
 ```php
-public function boot(): void
+final class OrderManager extends BaseManager
 {
-    OrderDomain::setItemLoader(
-        fn(OrderDomain $order) => $this->orderItems->getByOrderId($order->id),
-    );
+    private readonly OrderItemDao $orderItems;
+
+    public function __construct(ContainerInterface $registry)
+    {
+        parent::__construct($registry);
+        $this->orderItems = $registry->get(OrderItemDao::class);
+
+        OrderDomain::setItemLoader(
+            fn(OrderDomain $order) => $this->orderItems->getByOrderId($order->id),
+        );
+    }
 }
 ```
 
@@ -1274,14 +1284,24 @@ final class OrderDomain
 ```
 
 Domain 不该自己去取的关联数据，由 Manager 把 loader 注入进去：访问器读起来自然，
-依赖知识留在真正拥有它的那一层（见 `migears/domain` → *关联数据*）：
+依赖知识留在真正拥有它的那一层（见 `migears/domain` → *关联数据*）。这里没有生命周期钩子，
+也没有任何东西会替你调用 `boot()`：wiring 在对外提供服务之前把每个 Manager 建一次，
+所以构造函数就是它该在的地方。
 
 ```php
-public function boot(): void
+final class OrderManager extends BaseManager
 {
-    OrderDomain::setItemLoader(
-        fn(OrderDomain $order) => $this->orderItems->getByOrderId($order->id),
-    );
+    private readonly OrderItemDao $orderItems;
+
+    public function __construct(ContainerInterface $registry)
+    {
+        parent::__construct($registry);
+        $this->orderItems = $registry->get(OrderItemDao::class);
+
+        OrderDomain::setItemLoader(
+            fn(OrderDomain $order) => $this->orderItems->getByOrderId($order->id),
+        );
+    }
 }
 ```
 
