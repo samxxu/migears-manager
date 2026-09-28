@@ -7,10 +7,7 @@ id: "README"
 This directory is the record. Each item is one file: `issues/<id>.md`, with a front-matter header the
 tooling owns and an appended thread below the finding. `../ISSUES.md` is only the generated summary of what is here.
 
-本目录就是记录。每条条目一个文件：`issues/<id>.md`，头部前置字段由工具拥有，问题之下是追加的讨论串。
-`../ISSUES.md` 只是本目录内容的生成概览。
-
-## How an item moves / 条目如何流转
+## How an item moves
 
 | status | who sets it | meaning | waiting on |
 |---|---|---|---|
@@ -28,29 +25,11 @@ Thread lines are appended, never rewritten. Sign every entry (§2 of `collaborat
 keeps whatever status the item was already in. The table is rendered from the one vocabulary in
 `issue_store.py`, so it cannot drift from what the tooling enforces.
 
-| 状态 | 由谁设置 | 含义 | 在等谁 |
-|---|---|---|---|
-| `open` | 协调人，立案时 | 已立案，尚无人回复 | 负责人 |
-| `accepted` | 模块负责人 | 认同，待修复 | 负责人 |
-| `question` | 模块负责人 | 需要先做决策才能推进 | 协调人 |
-| `rejected` | 模块负责人 | 不认同；评审方以证据反驳或采纳为误报 | 评审方 |
-| `deferred` | 模块负责人 | 有意暂缓，附理由 | - |
-| `fixed` | 模块负责人 | 认为已修；评审方对照代码核实 | 评审方 |
-| `verified` | 协调人，依据评审方结论 | 修复已核实 | - |
-| `closed` | 协调人，依据评审方结论 | 无需再动；同时写入 `resolution` | - |
-
-讨论串只追加，不重写。每条都要署名（`collaboration-protocol.md` §2）。
-`new-evidence` 是讨论串用词，不是状态：它补充事实而不推动条目，因此前置字段保持该条目原有的状态。
-本表由 `issue_store.py` 里那份唯一词表渲染，因此不会与工具实际执行的规则脱节。
-
-## Standing notice / 长期说明
+## Standing notice
 
 **Never write into `../ISSUES.md`.** It is generated from the items in this directory and is rewritten
 wholesale on every filing, so anything typed there is lost. The record is `issues/`, and this is where
 the channel lives.
-
-**绝不要往 `../ISSUES.md` 里写。** 它由本目录的条目生成，每次立案都整段重写，写进去的字会丢。记录在
-`issues/`，渠道也在这里。
 
 1. You are responsible for your own module only. An opinion, a question, a piece of counter-evidence or a
    request for change about ANOTHER module needs the user's approval first, and then goes into THAT
@@ -69,6 +48,30 @@ the channel lives.
 
 ---
 
+# Issues — migears-manager（中文）
+
+本目录就是记录。每条条目一个文件：`issues/<id>.md`，头部前置字段由工具拥有，问题之下是追加的讨论串。
+`../ISSUES.md` 只是本目录内容的生成概览。
+
+## 条目如何流转
+
+| 状态 | 由谁设置 | 含义 | 在等谁 |
+|---|---|---|---|
+| `open` | 协调人，立案时 | 已立案，尚无人回复 | 负责人 |
+| `accepted` | 模块负责人 | 认同，待修复 | 负责人 |
+| `question` | 模块负责人 | 需要先做决策才能推进 | 协调人 |
+| `rejected` | 模块负责人 | 不认同；评审方以证据反驳或采纳为误报 | 评审方 |
+| `deferred` | 模块负责人 | 有意暂缓，附理由 | - |
+| `fixed` | 模块负责人 | 认为已修；评审方对照代码核实 | 评审方 |
+| `verified` | 协调人，依据评审方结论 | 修复已核实 | - |
+| `closed` | 协调人，依据评审方结论 | 无需再动；同时写入 `resolution` | - |
+
+讨论串只追加，不重写。每条都要署名（`collaboration-protocol.md` §2）。
+`new-evidence` 是讨论串用词，不是状态：它补充事实而不推动条目，因此前置字段保持该条目原有的状态。
+本表由 `issue_store.py` 里那份唯一词表渲染，因此不会与工具实际执行的规则脱节。
+
+## 长期说明
+
 **绝不要往 `../ISSUES.md` 里写。** 它由本目录的条目生成，每次立案都整段重写，写进去的字会丢。记录在
 `issues/`，渠道也在这里。
 
@@ -83,5 +86,3 @@ the channel lives.
    没有署名的条目下一轮可能被按新发现重新评级。
 5. 开工前先读条目：把每条开启条目按证据评估（签名条目也算），再把你接受的条目与自己的工作一并执行，
    不要拆成两轮。每条都要有状态词。
-
-
