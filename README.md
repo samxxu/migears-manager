@@ -24,7 +24,7 @@ The business layer — it owns a module's business operations, writes through DA
 - [Trade-offs](#trade-offs)
 - [Installation](#installation)
 - [API Reference](#api-reference)
-- [What this package does not do](#what-this-package-does-not-do)
+- [Boundaries](#boundaries)
 - [License](#license)
 
 ## Design spirit
@@ -641,9 +641,11 @@ BaseManager::listen(OrderEvents::CANCELLED, function (OrderDomain $order, int $a
 6. no wildcards, no `once`, no queue, no retries, no persistence, no cross-process delivery
 
 Point 5 has a consequence worth stating on its own, because there is no transaction manager and no
-outbox here: by the time the listeners run, the write **has already been committed**. A listener that
-throws therefore turns a finished write into a failed request, and the exception the caller sees says
-exactly that — `SideEffectFailedException` carries the event name and keeps the listener's own exception
+outbox here: by the time the listeners run, the write **has already been committed**. That leaves a
+window — the row is stored, its side effects are not — and nothing in this package closes it. A
+listener that throws therefore turns a finished write into a failed request, and the exception the
+caller sees says exactly that — `SideEffectFailedException` carries the event name and keeps the
+listener's own exception
 as `previous`, so an entry layer can tell this case from a write that never happened before it decides
 what to do. What it would naturally do — retry — writes the row a second time. The answers live outside
 this package, and both are honest:
@@ -969,7 +971,17 @@ It exists so that an entry layer can tell "the row is stored and a side effect f
 happened" — the difference between a retry that is safe and one that duplicates data. The bus wraps
 nothing itself; this is the Manager layer naming a failure it can already see.
 
-## What this package does not do
+## Boundaries
+
+**In scope**
+
+- The base class `BaseManager`: resolving the logger from the PSR-11 registry at construction,
+  `emit()`, and the wiring-side `listen()`.
+- The in-process event bus behind them: synchronous delivery in registration order, and
+  `SideEffectFailedException` when a listener throws (`EventBus` itself stays `@internal`).
+- Owning a module's business operations in a subclass — one public method per use case.
+
+**Not in scope (by design)**
 
 - No container interface of its own, and no container implementation: it speaks PSR-11 (`psr/container`) so that it and the web package stay independent of each other
 - No auto-wiring, no reflection, no constructor inspection — an id is asked for by name, and a missing one throws
@@ -1011,7 +1023,7 @@ MIT
 - [刻意的取舍](#刻意的取舍)
 - [安装](#安装)
 - [API 参考](#api-参考)
-- [本包不做的事](#本包不做的事)
+- [边界](#边界)
 - [许可证](#许可证)
 
 ## 设计精神
@@ -1589,6 +1601,7 @@ BaseManager::listen(OrderEvents::CANCELLED, function (OrderDomain $order, int $a
 6. 没有通配符、没有 `once`、没有队列、没有重试、没有持久化、没有跨进程投递
 
 第 5 条有一个后果值得单独说，因为这里既没有事务管理器也没有 outbox：监听器运行时，写入**已经提交**。
+这就留下一个窗口 —— 数据已经落库，副作用还没有发生 —— 本包无法把它关上。
 于是抛异常的监听器会把一次已经完成的写入变成一次失败的请求，而调用方看到的异常会把这个事实说清楚 ——
 `SideEffectFailedException` 带着事件名，并把监听器自己的异常放在 `previous` 里，入口层因此能分辨「数据已
 落库」与「什么都没发生」，再做决定。它最自然的反应 —— 重试 —— 会把这一行写第二遍。答案都在本包之外，
@@ -1895,7 +1908,16 @@ Manager 建在手写 SQL 与普通对象之上，同样成立。
 它的意义是让入口层能分辨「这一行已经落库、只是某个副效应失败」与「什么都没发生」—— 这正是「重试是安全的」与
 「重试会写出重复数据」之间的区别。总线本身不做任何包装；这是 Manager 层在给一个它已经看得见的失败命名。
 
-## 本包不做的事
+## 边界
+
+**范围内**
+
+- 基类 `BaseManager`：构造时从 PSR-11 注册表解析 logger、`emit()`，以及装配侧的 `listen()`。
+- 其背后的进程内事件总线：按注册顺序同步派发，监听器抛错时抛 `SideEffectFailedException`
+  （`EventBus` 本身保持 `@internal`）。
+- 在子类中拥有一个模块的业务操作 —— 每个公开方法就是一个用例。
+
+**范围外（刻意不做）**
 
 - 不自建容器接口，也不提供容器实现：它说 PSR-11（`psr/container`），从而与 web 包互不依赖
 - 没有自动装配、没有反射、不检查构造函数 —— id 按名字要，缺了就抛
