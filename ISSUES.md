@@ -17,17 +17,19 @@ Legend — **P0** functional or security · **P1** documentation that fails when
 
 | | |
 |---|---|
-| Unsettled | P0 0 · P1 0 · P2 1 · P3 1 · other 0 |
-| Settled | 0 of 2 |
-| Waiting on the owner | `P2-1` |
-| Waiting on the reviewer | `P3-1` |
+| Unsettled | P0 0 · P1 0 · P2 1 · P3 3 · other 0 |
+| Settled | 0 of 4 |
+| Waiting on the owner | `P2-1`, `P3-2`, `P3-3` |
 | Waiting on the coordinator | _nothing_ |
+| Waiting on the reviewer | `P3-1` |
 | Deferred, owing nobody | _nothing_ |
 
 | id | level | status | title |
 |---|---|---|---|
-| [`P2-1`](issues/P2-1.md) | P2 | **open** | The write-then-emit window is still real: a synchronous listener that … |
+| [`P2-1`](issues/P2-1.md) | P2 | **accepted** | The write-then-emit pattern leaves a window where the write succeeds … |
 | [`P3-1`](issues/P3-1.md) | P3 | **rejected** | Documentation mass is out of proportion: the README is 1,841 lines … |
+| [`P3-2`](issues/P3-2.md) | P3 | **open** | EventBus::emit() docblock claims 'The listener list is snapshotted when … |
+| [`P3-3`](issues/P3-3.md) | P3 | **open** | `public const VERSION` at `src/BaseManager.php:59` has no reader … |
 
 ## Unclosed
 
@@ -36,14 +38,16 @@ highest severity first. `waiting on` is the party who acts next, read from that 
 
 | | |
 |---|---|
-| Unclosed | **2** of 2 |
-| By status | `open` 1 · `rejected` 1 |
-| Waiting on | owner 1 · reviewer 1 |
+| Unclosed | **4** of 4 |
+| By status | `open` 2 · `accepted` 1 · `rejected` 1 |
+| Waiting on | owner 3 · reviewer 1 |
 
 | level | item | status | waiting on | title |
 |---|---|---|---|---|
-| **P2** | [`P2-1`](issues/P2-1.md) | `open` | owner | The write-then-emit window is still real: a synchronous listener that … |
+| **P2** | [`P2-1`](issues/P2-1.md) | `accepted` | owner | The write-then-emit pattern leaves a window where the write succeeds … |
 | **P3** | [`P3-1`](issues/P3-1.md) | `rejected` | reviewer | Documentation mass is out of proportion: the README is 1,841 lines … |
+| **P3** | [`P3-2`](issues/P3-2.md) | `open` | owner | EventBus::emit() docblock claims 'The listener list is snapshotted when … |
+| **P3** | [`P3-3`](issues/P3-3.md) | `open` | owner | `public const VERSION` at `src/BaseManager.php:59` has no reader … |
 
 ## Verdict
 
@@ -84,17 +88,19 @@ No test for SideEffectFailedException being thrown from emit() when multiple lis
 
 | | |
 |---|---|
-| 未了结 | P0 0 · P1 0 · P2 1 · P3 1 · 其他 0 |
-| 已了结 | 0 / 2 |
-| 等负责人 | `P2-1` |
-| 等评审方 | `P3-1` |
+| 未了结 | P0 0 · P1 0 · P2 1 · P3 3 · 其他 0 |
+| 已了结 | 0 / 4 |
+| 等模块主 | `P2-1`, `P3-2`, `P3-3` |
 | 等协调人 | _无_ |
+| 等评审方 | `P3-1` |
 | 已暂缓，不欠谁 | _无_ |
 
 | id | 级别 | 状态 | 标题 |
 |---|---|---|---|
-| [`P2-1`](issues/P2-1.md) | P2 | **open** | 「先写库后 emit」的窗口仍然存在：同步监听器抛异常会穿出用例，而数据已落库，入口层重试即重复写入。README … |
+| [`P2-1`](issues/P2-1.md) | P2 | **accepted** | 先写后 emit … |
 | [`P3-1`](issues/P3-1.md) | P3 | **rejected** | 文档体量失衡：README 1,841 行对应 240 行源码（约 … |
+| [`P3-2`](issues/P3-2.md) | P3 | **open** | EventBus::emit() 文档注释称「监听器列表在调用开始时被快照」，但实现直接遍历 $this->listeners[$event] … |
+| [`P3-3`](issues/P3-3.md) | P3 | **open** | `src/BaseManager.php:59` 的 `public const VERSION` … |
 
 ## 未关闭
 
@@ -103,14 +109,16 @@ No test for SideEffectFailedException being thrown from emit() when multiple lis
 
 | | |
 |---|---|
-| 未关闭 | **2** / 2 |
-| 按状态 | `open` 1 · `rejected` 1 |
-| 等在谁 | 负责人 1 · 评审方 1 |
+| 未关闭 | **4** / 4 |
+| 按状态 | `open` 2 · `accepted` 1 · `rejected` 1 |
+| 等在谁 | 模块主 3 · 评审方 1 |
 
 | 级别 | 条目 | 状态 | 等在谁 | 标题 |
 |---|---|---|---|---|
-| **P2** | [`P2-1`](issues/P2-1.md) | `open` | 负责人 | 「先写库后 emit」的窗口仍然存在：同步监听器抛异常会穿出用例，而数据已落库，入口层重试即重复写入。README … |
+| **P2** | [`P2-1`](issues/P2-1.md) | `accepted` | 模块主 | 先写后 emit … |
 | **P3** | [`P3-1`](issues/P3-1.md) | `rejected` | 评审方 | 文档体量失衡：README 1,841 行对应 240 行源码（约 … |
+| **P3** | [`P3-2`](issues/P3-2.md) | `open` | 模块主 | EventBus::emit() 文档注释称「监听器列表在调用开始时被快照」，但实现直接遍历 $this->listeners[$event] … |
+| **P3** | [`P3-3`](issues/P3-3.md) | `open` | 模块主 | `src/BaseManager.php:59` 的 `public const VERSION` … |
 
 ## 结论
 
