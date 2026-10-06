@@ -32,9 +32,10 @@ keeps whatever status the item was already in. The table is rendered from the on
 wholesale on every filing, so anything typed there is lost. The record is `issues/`, and this is where
 the channel lives.
 
-1. A remark about module X belongs in **X's** `issues/` directory, not in the one you happen to be working
-   in. The directories are separate records, and a finding filed against the wrong module is misfiled
-   rather than misplaced.
+1. **An owner writes inside its own module and nowhere else.** Its code, its docs and this directory are its
+   own; a remark about another module goes into the coordinator's inbox, the document `project.json` names as
+   `documents.coordinator_inbox`, and the coordinator reviews it and files it where it belongs. Writing into
+   another module's `issues/` yourself is out of bounds even when the finding is right.
 2. Land it on an item. If it concerns an item that exists, append to that item's thread in
    `issues/<id>.md`. If it is a new problem, file it as a new item through the tooling: ids are allocated
    by the tooling and are never written by hand.
@@ -77,8 +78,9 @@ the channel lives.
 **绝不要往 `../ISSUES.md` 里写。** 它由本目录的条目生成，每次立案都整段重写，写进去的字会丢。记录在
 `issues/`，渠道也在这里。
 
-1. 关于模块 X 的留言写进**X 的** `issues/` 目录，而不是你手上正在写的那个。两份目录是两份记录，而把
-   finding 立到错误的模块上，是立错了地方，不是放错了位置。
+1. **模块主只在自己模块里写，别处不写。** 它的代码、它的文档与这个目录归它自己；关于别的模块的留言写进
+   协调人的留言文档，即 `project.json` 以 `documents.coordinator_inbox` 命名的那个文件，由协调人复核后立到
+   它该在的地方。即便 finding 是对的，自己写进别人的 `issues/` 也算越界。
 2. 落在条目上。若针对某条已存在的条目，追加到该条目 `issues/<id>.md` 的讨论串；若是一个新问题，经工具
    立成新条目——编号由工具分配，绝不手写。
 3. 署名：身份与范围，让读者能把你的条目与别方的分开——三者之一：
