@@ -125,7 +125,7 @@ each Manager                                          built from the Registry
 ```php
 $order  = OrderDomain::fromArray($row);      // a value object
 $total  = new Money($cents);                 // a value object
-$errors = OrderDomain::validateArray($form); // nothing to configure
+$errors = OrderDomain::validateArray($data); // nothing to configure
 ```
 
 A Registry with value objects in it stops being "the configured things" and becomes a junk drawer
@@ -186,9 +186,13 @@ final class OrderManager extends BaseManager
         $this->orders = $registry->get(OrderDao::class);
     }
 
-    public function place(array $form, int $actorId): OrderDomain
+    public function place(string $title, int $userId, int $amount, int $actorId): OrderDomain
     {
-        $errors = OrderDomain::validateArray($form);                 // 1. validate
+        $errors = OrderDomain::validateArray([                       // 1. validate
+            'user_id' => $userId,
+            'title'   => $title,
+            'amount'  => $amount,
+        ]);
         if ($errors !== []) {
             throw new UnprocessableEntityHttpException('INVALID_ORDER');
         }
@@ -226,7 +230,7 @@ BaseManager::listen(OrderEvents::PLACED, function (OrderDomain $order) use (&$se
     $seen[] = $order->id;
 });
 
-$order = $manager->place(['user_id' => 1, 'title' => 'First order', 'amount' => 2500], actorId: 9);
+$order = $manager->place(title: 'First order', userId: 1, amount: 2500, actorId: 9);
 
 $this->assertSame(1, $order->id);
 $this->assertSame([1], $seen);
@@ -323,9 +327,12 @@ façade has stopped paying for itself and the conventions will drift apart.
 
 ## Four habits, with the alternative
 
-**Input: map it outside, not inside.** The Manager's parameters are its interface, and that interface
-should be data. `$_POST` and the session belong to the entry layer, which is also the only place that
-knows about status codes.
+**Input: map it outside, not inside — and name every field.** The Manager's parameters are its interface —
+its signature, not a PHP `interface`; this package declares no `ManagerInterface`, and a Manager is a
+contract by convention. That interface should be data: `$_POST` and the session belong to the entry layer,
+which is also the only place that knows about status codes. Take one scalar per field the use case acts on,
+so that the signature *is* the contract. An `array $form` reads shorter, but it moves the real contract into the body:
+which keys, which types, which are optional, and a renamed key is caught by nothing.
 
 ```php
 // ✗ the Manager knows the transport
@@ -334,8 +341,8 @@ public function place(): OrderDomain
     $userId = (int) $_POST['user_id'];
 }
 
-// ✓ the Manager takes data
-public function place(array $form, int $actorId): OrderDomain
+// ✓ the Manager takes named data
+public function place(string $title, int $userId, int $amount, int $actorId): OrderDomain
 ```
 
 **Queries: ask the DAO, not the database.** Once a Manager holds a `PDO` it will eventually write a
@@ -385,11 +392,13 @@ $row   = $order->toArray();                                            // Domain
 ```
 
 The rules live on the object rather than in the Manager, so two use cases that touch the same record
-cannot disagree about what a valid record is. The Manager only decides what to do with the answer —
-here, refusing the request with an exception the entry layer already knows how to render:
+cannot disagree about what a valid record is. The Domain validates and maps the array it also stores —
+that array never crosses the Manager's interface; the Manager assembles it here, out of the scalars it
+was handed. The Manager only decides what to do with the answer — here, refusing the request with an
+exception the entry layer already knows how to render:
 
 ```php
-$errors = OrderDomain::validateArray($form);
+$errors = OrderDomain::validateArray($data);
 if ($errors !== []) {
     throw new UnprocessableEntityHttpException('INVALID_ORDER');
 }
@@ -517,27 +526,40 @@ final class OrderDao
 ```
 
 Coordinating several DAOs is the Manager's job, and this is the full body of `place()` — the skeleton's
-`insert([...])` expanded. Read it once for the decisions (are the fields valid? are there items? what is
-the total?) and once for the persistence (one order row, then one row per item); the two never mix:
+`insert([...])` expanded. The interface stays flat: one scalar per field the use case acts on, and a
+typed list for the line items, because a list of objects is still a contract while an associative bag is
+not. Read it once for the decisions (are the fields valid? are there items? what is the total?) and once
+for the persistence (one order row, then one row per item); the two never mix:
 
 ```php
-public function place(array $form, int $actorId): OrderDomain
-{
-    $errors = OrderDomain::validateArray($form);
+/**
+ * @param list<OrderItemInput> $items
+ */
+public function place(
+    string $title,
+    int $userId,
+    int $amount,
+    int $actorId,
+    array $items = [],
+): OrderDomain {
+    $errors = OrderDomain::validateArray([
+        'user_id' => $userId,
+        'title'   => $title,
+        'amount'  => $amount,
+    ]);
     if ($errors !== []) {
         throw new UnprocessableEntityHttpException('INVALID_ORDER');
     }
 
-    $items = $form['items'] ?? [];
     if ($items === []) {
         throw new ConflictHttpException('ORDER_WITHOUT_ITEMS');
     }
 
-    $total = array_sum(array_map(fn(array $i) => (int) $i['price'] * (int) $i['quantity'], $items));
+    $total = array_sum(array_map(fn (OrderItemInput $i) => $i->price * $i->quantity, $items));
 
     $orderId = $this->orders->insert([
-        'user_id'    => (int) $form['user_id'],
-        'title'      => trim((string) $form['title']),
+        'user_id'    => $userId,
+        'title'      => $title,
         'amount'     => $total,
         'status'     => 'PLACED',
         'created_at' => time(),
@@ -547,9 +569,9 @@ public function place(array $form, int $actorId): OrderDomain
     foreach ($items as $item) {
         $this->orderItems->insert([
             'order_id' => $orderId,
-            'sku'      => $item['sku'],
-            'price'    => (int) $item['price'],
-            'quantity' => (int) $item['quantity'],
+            'sku'      => $item->sku,
+            'price'    => $item->price,
+            'quantity' => $item->quantity,
         ]);
     }
 
@@ -560,6 +582,10 @@ public function place(array $form, int $actorId): OrderDomain
     return $order;
 }
 ```
+
+`OrderItemInput` is the application's own readonly object — `new OrderItemInput(sku: 'SKU-1', quantity: 2, price: 1250)` —
+which is what lets the items travel as a list and still be typed. The framework ships no such class: like a
+Domain, it belongs to the module that has the concept.
 
 **Transactions.** There is no hidden transaction manager to reason about, which is why the rule fits
 in a table. In the common case — one statement, or several tables that always move together — the
@@ -835,7 +861,13 @@ final class Index extends AbstractResource
         // plain scalar — the Manager never reads the session itself
         $actorId = (int) $this->resolve('auth_user_id');
 
-        $order = $this->resolve(OrderManager::class)->place($request->body, $actorId);
+        // the payload is mapped here, field by field: this layer knows its shape, the Manager does not
+        $order = $this->resolve(OrderManager::class)->place(
+            title: (string) $request->body['title'],
+            userId: (int) $request->body['user_id'],
+            amount: (int) $request->body['amount'],
+            actorId: $actorId,
+        );
 
         return Response::json(['order_id' => $order->id, 'status' => $order->status], 201);
     }
@@ -863,6 +895,7 @@ recognise one of them, the fix column is usually the smaller change.
 | **Sends mail itself** | The use case now needs SMTP to be tested, and every new channel edits the Manager | Emit an event |
 | **Returns arrays or JSON** — `['code' => 0, ...]` | The layer that knows least about HTTP decides the response shape | Return Domains |
 | **Reads the request** | The use case cannot run from cron, or be tested without HTTP | Pass data in |
+| **An `array $form` parameter** — an associative bag in the use case's signature | The real contract moves into the body: which keys, which types, which are optional; a renamed key is caught by nothing | One named scalar per field; a list of typed objects for collections |
 | **Static state in business code** — `instance()`, a static container | Tests leak into each other; the object graph becomes invisible | Inject the Registry; one Manager per request. The bus is the package's single deliberate exception, and business code never holds it |
 | **Two Managers kept in sync by hand** | One write is eventually forgotten | One owner writes, the other reacts to an event |
 | **Event used as a command** — `emit('ship.the.order', $order)` | The emitter quietly takes the responsibility back, invisibly | Name the fact: `order.placed` |
@@ -923,6 +956,7 @@ reverse them if your project disagrees — none of them is load-bearing for the 
 | The contract is PSR-11's (`psr/container`) | Declare our own `Registry` interface here | The web package can implement the same contract without depending on this one — and any PSR-11 container works, including one in a test. The cost is that the standard name says "container", which carries auto-wiring associations we do not honour | Declare your own interface and accept the dependency between the two packages |
 | The event bus is internal and process-wide | Pass it in, or register it in the Registry | It is plumbing, not a collaborator: neither a Manager nor a wiring should have to hold it. The cost is one shared instance per process | Send events through your own mechanism instead of `emit()` |
 | `BaseManager` gives only the logger and `emit()` | A fat base class with CRUD, logger and registry access | Every extra member is a decision the framework makes for you | Don't extend it; implement your own `emit()` |
+| The use case's interface is scalars and typed lists | An `array $form` parameter | The signature is the contract: static analysis and every IDE see it, and a field that moves shows up at the call sites. The cost is a longer signature, and adding a field edits those call sites — which is the point | Pass a payload array and pick the keys out in the body |
 | A listener failure arrives as `SideEffectFailedException` | Let the listener's exception through untouched | The write is already committed, and a caller that cannot tell that apart from "nothing happened" retries and duplicates the row. The cost is one more public type, and a caller that caught the listener's exception by class name no longer sees it directly | Propagate untouched and let callers read the message |
 | Event names are plain strings | One class per event | No files, no inheritance; the cost is that a typo is silent, hence the constants | Use class names as event names |
 | Payload is positional values | A single event object | No envelope, no base class; the signature documents it | Pass one object as the only payload |
@@ -1122,7 +1156,7 @@ pdo · redis · logger · mailer · cache · config        连接、客户端、
 ```php
 $order  = OrderDomain::fromArray($row);      // 值对象
 $total  = new Money($cents);                 // 值对象
-$errors = OrderDomain::validateArray($form); // 没什么可配置的
+$errors = OrderDomain::validateArray($data); // 没什么可配置的
 ```
 
 一个塞了值对象的 Registry 会不再等于「配置好的那些东西」，而变成一个每个 id 都靠猜的杂物抽屉。
@@ -1180,9 +1214,13 @@ final class OrderManager extends BaseManager
         $this->orders = $registry->get(OrderDao::class);
     }
 
-    public function place(array $form, int $actorId): OrderDomain
+    public function place(string $title, int $userId, int $amount, int $actorId): OrderDomain
     {
-        $errors = OrderDomain::validateArray($form);                 // 1. 校验
+        $errors = OrderDomain::validateArray([                       // 1. 校验
+            'user_id' => $userId,
+            'title'   => $title,
+            'amount'  => $amount,
+        ]);
         if ($errors !== []) {
             throw new UnprocessableEntityHttpException('INVALID_ORDER');
         }
@@ -1219,7 +1257,7 @@ BaseManager::listen(OrderEvents::PLACED, function (OrderDomain $order) use (&$se
     $seen[] = $order->id;
 });
 
-$order = $manager->place(['user_id' => 1, 'title' => 'First order', 'amount' => 2500], actorId: 9);
+$order = $manager->place(title: 'First order', userId: 1, amount: 2500, actorId: 9);
 
 $this->assertSame(1, $order->id);
 $this->assertSame([1], $seen);
@@ -1311,8 +1349,10 @@ final class OrderManager extends BaseManager
 
 ## 四个习惯，以及它们的反例
 
-**入参：在外面映射，不在里面。** Manager 的参数就是它的接口，而接口应该是数据。`$_POST` 和 session 属于入口层，
-那也应该是唯一知道状态码的地方。
+**入参：在外面映射，不在里面 —— 并且每个字段都取名。** Manager 的参数就是它的接口 —— 指方法签名，不是 PHP 的
+`interface`：本包不声明 `ManagerInterface`，Manager 是约定意义上的契约。而接口应该是数据：`$_POST` 和
+session 属于入口层，那也应该是唯一知道状态码的地方。用例用到的每个字段都要一个标量参数，让签名**本身就是契约**。
+`array $form` 看起来更短，但它把真正的契约挪进了函数体：哪些键、什么类型、哪个可空 —— 而且键名改了没有任何东西会报错。
 
 ```php
 // ✗ Manager 知道了传输层
@@ -1321,8 +1361,8 @@ public function place(): OrderDomain
     $userId = (int) $_POST['user_id'];
 }
 
-// ✓ Manager 只接收数据
-public function place(array $form, int $actorId): OrderDomain
+// ✓ Manager 只接收取好名字的数据
+public function place(string $title, int $userId, int $amount, int $actorId): OrderDomain
 ```
 
 **查询：问 DAO，不问数据库。** 一旦 Manager 手里有了 `PDO`，早晚会写出一条语句，然后同一张表的 SQL 就散落在两个文件里。
@@ -1369,10 +1409,11 @@ $row   = $order->toArray();                                            // Domain
 ```
 
 规则挂在对象上而不是 Manager 里，因此两个碰同一条记录的用例，不可能对「什么算合法」有不同意见。
-Manager 只决定拿到校验结果之后怎么办 —— 这里是拒绝请求，抛一个入口层已经会渲染的异常：
+Domain 校验并映射的，是它自己也要落库的那个数组 —— 那个数组从不穿过 Manager 的接口，它是 Manager 在这里用手上的
+标量拼出来的。Manager 只决定拿到校验结果之后怎么办 —— 这里是拒绝请求，抛一个入口层已经会渲染的异常：
 
 ```php
-$errors = OrderDomain::validateArray($form);
+$errors = OrderDomain::validateArray($data);
 if ($errors !== []) {
     throw new UnprocessableEntityHttpException('INVALID_ORDER');
 }
@@ -1496,27 +1537,39 @@ final class OrderDao
 ```
 
 把多个 DAO 协调起来是 Manager 的活，下面这段就是 `place()` 的完整实现 —— 也就是骨架里那句
-`insert([...])` 展开后的样子。先读一遍判断部分（字段合法吗？有商品行吗？总额多少？），
+`insert([...])` 展开后的样子。接口保持扁平：用例用到的每个字段一个标量，商品行则是一个**类型化的列表** ——
+对象组成的列表仍然是契约，关联数组不是。先读一遍判断部分（字段合法吗？有商品行吗？总额多少？），
 再读一遍落库部分（一条订单行，然后每个商品一条）；两者从头到尾没有混在一起：
 
 ```php
-public function place(array $form, int $actorId): OrderDomain
-{
-    $errors = OrderDomain::validateArray($form);
+/**
+ * @param list<OrderItemInput> $items
+ */
+public function place(
+    string $title,
+    int $userId,
+    int $amount,
+    int $actorId,
+    array $items = [],
+): OrderDomain {
+    $errors = OrderDomain::validateArray([
+        'user_id' => $userId,
+        'title'   => $title,
+        'amount'  => $amount,
+    ]);
     if ($errors !== []) {
         throw new UnprocessableEntityHttpException('INVALID_ORDER');
     }
 
-    $items = $form['items'] ?? [];
     if ($items === []) {
         throw new ConflictHttpException('ORDER_WITHOUT_ITEMS');
     }
 
-    $total = array_sum(array_map(fn(array $i) => (int) $i['price'] * (int) $i['quantity'], $items));
+    $total = array_sum(array_map(fn (OrderItemInput $i) => $i->price * $i->quantity, $items));
 
     $orderId = $this->orders->insert([
-        'user_id'    => (int) $form['user_id'],
-        'title'      => trim((string) $form['title']),
+        'user_id'    => $userId,
+        'title'      => $title,
         'amount'     => $total,
         'status'     => 'PLACED',
         'created_at' => time(),
@@ -1526,9 +1579,9 @@ public function place(array $form, int $actorId): OrderDomain
     foreach ($items as $item) {
         $this->orderItems->insert([
             'order_id' => $orderId,
-            'sku'      => $item['sku'],
-            'price'    => (int) $item['price'],
-            'quantity' => (int) $item['quantity'],
+            'sku'      => $item->sku,
+            'price'    => $item->price,
+            'quantity' => $item->quantity,
         ]);
     }
 
@@ -1539,6 +1592,9 @@ public function place(array $form, int $actorId): OrderDomain
     return $order;
 }
 ```
+
+`OrderItemInput` 是应用自己的 readonly 小对象 —— `new OrderItemInput(sku: 'SKU-1', quantity: 2, price: 1250)` ——
+正因为它存在，商品行才能既是列表、又仍然是有类型的。框架不提供这个类：和 Domain 一样，它属于拥有这个概念的那个模块。
 
 **事务。** 这里没有隐藏的事务管理器需要推理，所以规则一张表就够。常见情况下 —— 单条语句，或者总是成对变动的两张表 ——
 这个问题根本不会传到 Manager 这里。
@@ -1793,7 +1849,13 @@ final class Index extends AbstractResource
         // 身份由应用的鉴权层解析，并以普通标量传入 —— Manager 从不自己读会话
         $actorId = (int) $this->resolve('auth_user_id');
 
-        $order = $this->resolve(OrderManager::class)->place($request->body, $actorId);
+        // 入参在这里逐字段映射：这一层知道载荷的形状，Manager 不知道
+        $order = $this->resolve(OrderManager::class)->place(
+            title: (string) $request->body['title'],
+            userId: (int) $request->body['user_id'],
+            amount: (int) $request->body['amount'],
+            actorId: $actorId,
+        );
 
         return Response::json(['order_id' => $order->id, 'status' => $order->status], 201);
     }
@@ -1819,6 +1881,7 @@ final class Index extends AbstractResource
 | **自己发邮件** | 用例的测试从此需要 SMTP，每加一个渠道都要改 Manager | 发事件 |
 | **返回数组或 JSON** — `['code' => 0, ...]` | 最不了解 HTTP 的那一层，反而决定了响应形态 | 返回 Domain |
 | **读 Request** | 用例无法从 cron 跑，也无法脱离 HTTP 测试 | 把数据传进来 |
+| **`array $form` 当参数** — 用例签名里出现关联数组袋子 | 真正的契约被挪进函数体：哪些键、什么类型、哪个可空；键名改了没有任何东西会报错 | 一个字段一个取好名字的标量；集合用类型化对象的列表 |
 | **业务代码里的静态状态** — `instance()`、静态容器 | 测试相互污染；对象图变得不可见 | 注入 Registry；每请求一个 Manager。总线是本包唯一刻意的例外，而且业务代码永远不持有它 |
 | **靠人工同步的两个 Manager** | 迟早漏掉一次写入 | 一方负责写，另一方对事件作出反应 |
 | **把事件当命令** — `emit('ship.the.order', $order)` | 发出方悄悄把职责又拿了回来，而且不可见 | 给事实命名：`order.placed` |
@@ -1876,6 +1939,7 @@ BaseManager::listen(OrderEvents::PLACED, function (OrderDomain $order) use ($reg
 | 契约用 PSR-11（`psr/container`） | 在本包里自建 `Registry` 接口 | web 包可以实现同一个契约、却不依赖本包 —— 而且任何 PSR-11 容器都能用，测试里那个也行。代价是标准名字叫「container」，自带我们并不遵循的自动装配联想 | 自建接口，并接受两个包之间的依赖 |
 | 事件总线是内部件、进程级 | 传进来，或者注册进 Registry | 它是管道，不是协作者：Manager 和 wiring 都不该持有它。代价是每进程一个共享实例 | 不用 `emit()`，改用你自己的机制发事件 |
 | `BaseManager` 只给 logger 与 `emit()` | 塞进 CRUD、logger 和 Registry 访问器的胖基类 | 每多一个成员，就是框架替你多做一次决定 | 不继承它，自己实现 `emit()` |
+| 用例接口一律用标量，集合用类型化列表 | `array $form` 参数 | 签名就是契约：静态分析与所有 IDE 都看得见，字段挪了位置会在调用点显形。代价是签名更长，加字段要改调用点 —— 而这正是目的 | 传一个载荷数组，在函数体里取键 |
 | 监听器失败以 `SideEffectFailedException` 到达 | 让监听器的异常原样穿出 | 写入已经提交，调用方若分不清「数据已落库」和「什么都没发生」，就会重试并写出第二行。代价是多一个公开类型，而且按类名捕获监听器异常的调用方不再直接看到它 | 原样穿透，让调用方读消息自行判断 |
 | 事件名是普通字符串 | 一个事件一个类 | 零文件、零继承；代价是拼错静默，所以推荐常量 | 改用类名做事件名 |
 | 载荷是位置参数 | 单个事件对象 | 没有信封、没有基类；监听器签名即文档 | 只传一个对象作为唯一载荷 |
