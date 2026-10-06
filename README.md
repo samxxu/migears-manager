@@ -1,6 +1,6 @@
 # migears/manager
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.3.0-blue)
 
 The business layer — it owns a module's business operations, writes through DAOs, and announces every side effect as an event.
 
@@ -210,6 +210,11 @@ elided here; the concrete version appears under *Domains* and *DAOs* below.
 Run it with a two-entry registry — no container, no bootstrap, no HTTP:
 
 ```php
+protected function setUp(): void
+{
+    EventBus::reset();          // the bus is process-wide: every test starts with an empty one
+}
+
 $orders  = new InMemoryOrderDao();
 $manager = new OrderManager(new ArrayContainer([
     OrderDao::class         => $orders,
@@ -227,9 +232,9 @@ $this->assertSame(1, $order->id);
 $this->assertSame([1], $seen);
 ```
 
-`BaseManager` is where the logger and `emit()` come from, so every Manager extends it. It gives nothing
-else: no CRUD, no query helpers, no accessor for the Registry — a Manager uses the Registry in its own
-constructor and then forgets it exists.
+`BaseManager` is where the logger and `emit()` come from, so every Manager extends it. Apart from the
+`VERSION` constant it gives nothing else: no CRUD, no query helpers, no accessor for the Registry — a
+Manager uses the Registry in its own constructor and then forgets it exists.
 
 ## Responsibilities
 
@@ -763,6 +768,11 @@ not on the bus.
 **Testing events** needs no mock: register a listener the way the wiring does, then assert what it saw.
 
 ```php
+protected function setUp(): void
+{
+    EventBus::reset();          // the bus is process-wide: every test starts with an empty one
+}
+
 $payments = new InMemoryPaymentDao(['status' => 'PENDING']);
 $manager  = new PaymentManager(new ArrayContainer([
     PaymentDao::class      => $payments,
@@ -950,6 +960,7 @@ caught either way.
 
 | Member | Visibility | Description |
 |---|---|---|
+| `VERSION` | public const | The package version, in step with the badge and `composer.json` |
 | `__construct(ContainerInterface $registry)` | public | Resolves the logger, which is mandatory; subclasses forward with `parent::__construct($registry)` and resolve their own DAOs |
 | `listen(string $event, callable $listener)` | public static | Subscribe a listener — the wiring calls this once, at initialization |
 | `emit(string $event, mixed ...$payload)` | protected | Emit an event once the write has succeeded |
@@ -1001,7 +1012,7 @@ MIT
 
 # migears/manager
 
-![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Version](https://img.shields.io/badge/version-2.3.0-blue)
 
 业务层 — 拥有一个模块的业务操作、经 DAO 落库，并把每一项副效应都宣告为事件。
 
@@ -1192,6 +1203,11 @@ final class OrderManager extends BaseManager
 用一个两条目的 Registry 就能跑 —— 不需要容器、不需要 bootstrap、不需要 HTTP：
 
 ```php
+protected function setUp(): void
+{
+    EventBus::reset();          // 总线是进程级：每个用例都从一条空总线开始
+}
+
 $orders  = new InMemoryOrderDao();
 $manager = new OrderManager(new ArrayContainer([
     OrderDao::class         => $orders,
@@ -1209,8 +1225,9 @@ $this->assertSame(1, $order->id);
 $this->assertSame([1], $seen);
 ```
 
-`BaseManager` 就是 logger 和 `emit()` 的来源，所以每个 Manager 都继承它。它不给别的东西：没有 CRUD、
-没有查询助手、也没有取 Registry 的访问器 —— Manager 在自己的构造函数里用完 Registry 就忘掉它。
+`BaseManager` 就是 logger 和 `emit()` 的来源，所以每个 Manager 都继承它。除了 `VERSION` 常量，它不给
+别的东西：没有 CRUD、没有查询助手、也没有取 Registry 的访问器 —— Manager 在自己的构造函数里用完
+Registry 就忘掉它。
 
 ## Manager 的职责
 
@@ -1715,6 +1732,11 @@ cron 和测试里不可能表现不同。
 **测试事件**不需要 mock：像 wiring 那样注册一个监听器，然后断言它看到了什么。
 
 ```php
+protected function setUp(): void
+{
+    EventBus::reset();          // 总线是进程级：每个用例都从一条空总线开始
+}
+
 $payments = new InMemoryPaymentDao(['status' => 'PENDING']);
 $manager  = new PaymentManager(new ArrayContainer([
     PaymentDao::class      => $payments,
@@ -1889,6 +1911,7 @@ Manager 建在手写 SQL 与普通对象之上，同样成立。
 
 | 成员 | 可见性 | 说明 |
 |---|---|---|
+| `VERSION` | public const | 本包版本号，与徽章、`composer.json` 保持一致 |
 | `__construct(ContainerInterface $registry)` | public | 解析必需的 logger；子类用 `parent::__construct($registry)` 转发，并解析自己的 DAO |
 | `listen(string $event, callable $listener)` | public static | 订阅监听器 —— 由 wiring 在初始化时调用一次 |
 | `emit(string $event, mixed ...$payload)` | protected | 在写入成功之后发出事件 |

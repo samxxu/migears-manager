@@ -3,11 +3,12 @@
     "description": "Minimalist Manager layer — business orchestration: coordinate Domains, persist through DAOs, notify through events",
     "type": "library",
     "license": "MIT",
-    "version": "2.0.0",
+    "version": "2.3.0",
     "authors": [
         {
             "name": "Sam X. Xu",
-            "email": "samxxu@gmail.com"
+            "email": "samxxu@gmail.com",
+            "role": "Developer"
         }
     ],
     "keywords": [
@@ -20,6 +21,11 @@
         "domain",
         "migears"
     ],
+    "homepage": "https://github.com/samxxu/migears-manager",
+    "support": {
+        "issues": "https://github.com/samxxu/migears-manager/issues",
+        "source": "https://github.com/samxxu/migears-manager"
+    },
     "require": {
         "php": "^8.1",
         "psr/container": "^2.0",

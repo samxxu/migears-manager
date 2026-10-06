@@ -56,7 +56,7 @@ use Throwable;
  */
 abstract class BaseManager
 {
-    public const VERSION = '2.0.0';
+    public const VERSION = '2.3.0';
 
     private readonly LoggerInterface $logger;
 
